@@ -4,7 +4,7 @@ option go_package="github.com/bellacbs/posts/proto-buffer";
 
 service PostService {
   rpc CreatePost(Post) returns (Success);
-  rpc GetPosts(Empty) returns (Posts);
+  rpc GetPosts(Empty) returns (stream Posts);
 }
 
 message Empty{}

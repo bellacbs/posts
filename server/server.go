@@ -19,6 +19,7 @@ var (
 
 type Server struct {
 	PostList []*Post.Post
+	clients  map[pd.PostService_GetPostsServer]struct{}
 	pd.UnimplementedPostServiceServer
 }
 
@@ -30,19 +31,48 @@ func (s *Server) CreatePost(ctx context.Context, req *pd.Post) (*pd.Success, err
 		Content: req.Content,
 	}
 	s.PostList = append(s.PostList, post)
-	return &pd.Success{Success: true}, nil
-}
 
-func (s *Server) GetPosts(ctx context.Context, req *pd.Empty) (*pd.Posts, error) {
-	posts := &pd.Posts{}
+	updatePosts := &pd.Posts{}
 	for _, p := range s.PostList {
-		posts.Posts = append(posts.Posts, &pd.Post{
+		updatePosts.Posts = append(updatePosts.Posts, &pd.Post{
 			Id:      p.ID,
 			Title:   p.Title,
 			Content: p.Content,
 		})
 	}
-	return posts, nil
+
+	for client := range s.clients {
+		err := client.Send(updatePosts)
+		if err != nil {
+			delete(s.clients, client)
+		}
+	}
+	return &pd.Success{Success: true}, nil
+}
+
+func (s *Server) GetPosts(req *pd.Empty, stream pd.PostService_GetPostsServer) error {
+	if s.clients == nil {
+		s.clients = make(map[pd.PostService_GetPostsServer]struct{})
+	}
+	updateChanel := make(chan *pd.Posts)
+	s.clients[stream] = struct{}{}
+	go func() {
+		defer close(updateChanel)
+		for {
+			select {
+			case <-stream.Context().Done():
+				delete(s.clients, stream)
+				return
+			}
+		}
+	}()
+
+	for update := range updateChanel {
+		if err := stream.Send(update); err != nil {
+			return nil
+		}
+	}
+	return nil
 }
 
 func Init() {
