@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -13,8 +12,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-var (
-	port = flag.Int("port", 50051, "The server port")
+const (
+	port = ":50051"
 )
 
 type Server struct {
@@ -24,6 +23,7 @@ type Server struct {
 }
 
 func (s *Server) CreatePost(ctx context.Context, req *pd.Post) (*pd.Success, error) {
+	fmt.Println("CreatePost method called")
 	id := uuid.New()
 	post := &Post.Post{
 		ID:      id.String(),
@@ -32,14 +32,7 @@ func (s *Server) CreatePost(ctx context.Context, req *pd.Post) (*pd.Success, err
 	}
 	s.PostList = append(s.PostList, post)
 
-	updatePosts := &pd.Posts{}
-	for _, p := range s.PostList {
-		updatePosts.Posts = append(updatePosts.Posts, &pd.Post{
-			Id:      p.ID,
-			Title:   p.Title,
-			Content: p.Content,
-		})
-	}
+	updatePosts := s.getUpdatePost()
 
 	for client := range s.clients {
 		err := client.Send(updatePosts)
@@ -51,6 +44,7 @@ func (s *Server) CreatePost(ctx context.Context, req *pd.Post) (*pd.Success, err
 }
 
 func (s *Server) GetPosts(req *pd.Empty, stream pd.PostService_GetPostsServer) error {
+	fmt.Println("GetPost method called")
 	if s.clients == nil {
 		s.clients = make(map[pd.PostService_GetPostsServer]struct{})
 	}
@@ -67,16 +61,31 @@ func (s *Server) GetPosts(req *pd.Empty, stream pd.PostService_GetPostsServer) e
 		}
 	}()
 
-	for update := range updateChanel {
-		if err := stream.Send(update); err != nil {
-			return nil
+	updatePosts := s.getUpdatePost()
+
+	for clientStream := range s.clients {
+		if err := clientStream.Send(updatePosts); err != nil {
+			return err
 		}
 	}
+	<-stream.Context().Done()
 	return nil
 }
 
+func (s *Server) getUpdatePost() *pd.Posts {
+	updatePosts := &pd.Posts{}
+	for _, p := range s.PostList {
+		updatePosts.Posts = append(updatePosts.Posts, &pd.Post{
+			Id:      p.ID,
+			Title:   p.Title,
+			Content: p.Content,
+		})
+	}
+	return updatePosts
+}
+
 func Init() {
-	listen, err := net.Listen("tcp", ":50051")
+	listen, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatal("Failed too listen: %v", err)
 	}
