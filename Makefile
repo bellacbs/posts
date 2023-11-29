@@ -5,4 +5,4 @@ run: build
 	@./bin/posts
 
 dev:
-	@gin run *go
+	@gin run -p 50051 *go
